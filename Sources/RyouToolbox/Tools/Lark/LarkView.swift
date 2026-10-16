@@ -12,7 +12,9 @@ struct LarkView: View {
         VStack(spacing: 0) {
             summary
             Divider()
-            if let err = model.error {
+            if model.cliMissing || model.installing || !model.installLog.isEmpty && model.error != nil {
+                installPane
+            } else if let err = model.error {
                 ContentUnavailableView("Lark CLI 不可用", systemImage: "exclamationmark.triangle", description: Text(err))
             } else {
                 List(model.profiles) { p in row(p) }
@@ -46,6 +48,28 @@ struct LarkView: View {
                 deleteTarget = nil
             }
         }
+    }
+
+    private var installPane: some View {
+        VStack(spacing: 12) {
+            ContentUnavailableView("未检测到 Lark CLI", systemImage: "shippingbox",
+                                   description: Text("需要 Node.js。点下面按钮会执行 npm install -g @larksuite/cli"))
+            Button { Task { await model.installCLI() } } label: {
+                if model.installing { ProgressView().controlSize(.small) } else { Text("一键安装 Lark CLI") }
+            }
+            .buttonStyle(.borderedProminent).disabled(model.installing)
+            if !model.installLog.isEmpty {
+                ScrollView {
+                    Text(model.installLog).font(.system(size: 11, design: .monospaced))
+                        .frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled)
+                }
+                .frame(maxHeight: 160).padding(8)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal)
+            }
+        }
+        .padding(.top, 20)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 
     private var summary: some View {

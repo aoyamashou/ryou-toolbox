@@ -32,6 +32,9 @@ final class LarkModel {
     var error: String?
     var message: String?
     var loading = false
+    var cliMissing = false
+    var installing = false
+    var installLog = ""
 
     var current: LarkProfile? { profiles.first { $0.active } }
 
@@ -39,6 +42,7 @@ final class LarkModel {
         loading = true
         defer { loading = false }
         let r = await Shell.run("lark-cli", ["profile", "list"])
+        cliMissing = r.status == 127   // env: 找不到命令
         guard let data = r.stdout.data(using: .utf8),
               let items = try? JSONDecoder().decode([ProfileItem].self, from: data) else {
             profiles = []
@@ -55,6 +59,30 @@ final class LarkModel {
             return out
         }
         profiles = base.compactMap { b in checked.first { $0.name == b.name } }
+    }
+
+    /// 一键安装：npm install -g @larksuite/cli，输出实时写入 installLog。
+    func installCLI() async {
+        guard !installing else { return }
+        installing = true
+        installLog = ""
+        defer { installing = false }
+        if await Shell.run("npm", ["--version"]).status != 0 {
+            installLog = "❌ 没找到 npm，请先安装 Node.js（https://nodejs.org）后再试。\n"
+            return
+        }
+        installLog = "$ npm install -g @larksuite/cli\n"
+        let (stream, cont) = AsyncStream<String>.makeStream()
+        let proc = StreamingProcess()
+        let task = Task.detached { () -> Int32 in
+            let code = await proc.run("npm", ["install", "-g", "@larksuite/cli"]) { cont.yield($0) }
+            cont.finish()
+            return code
+        }
+        for await line in stream { installLog += line + "\n" }
+        let code = await task.value
+        installLog += code == 0 ? "✅ 安装完成\n" : "❌ 安装失败（退出码 \(code)），请查看上面的输出\n"
+        await refresh()
     }
 
     func use(_ name: String) async {
