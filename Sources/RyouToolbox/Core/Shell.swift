@@ -7,10 +7,17 @@ struct ShellResult: Sendable {
 }
 
 enum Shell {
-    /// GUI 应用没有 shell 的 PATH，这里补全常见 CLI 目录。
+    /// GUI 应用没有 shell 的 PATH，这里补全常见 CLI 目录（含 pipx/uv 的 ~/.local/bin）。
     static let environment: [String: String] = {
         var env = ProcessInfo.processInfo.environment
-        let extra = "/opt/homebrew/bin:/usr/local/bin:/Applications/Tailscale.app/Contents/MacOS"
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        let extra = [
+            "\(home)/.local/bin",
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "\(home)/.cargo/bin",
+            "/Applications/Tailscale.app/Contents/MacOS",
+        ].joined(separator: ":")
         env["PATH"] = extra + ":" + (env["PATH"] ?? "/usr/bin:/bin")
         env["LARKSUITE_CLI_NO_UPDATE_NOTIFIER"] = "1"
         env["LARKSUITE_CLI_NO_SKILLS_NOTIFIER"] = "1"
@@ -24,6 +31,7 @@ enum Shell {
                 p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
                 p.arguments = [command] + args
                 p.environment = environment
+                p.standardInput = FileHandle.nullDevice
                 let out = Pipe(), err = Pipe()
                 p.standardOutput = out
                 p.standardError = err

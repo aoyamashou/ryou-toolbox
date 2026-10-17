@@ -13,7 +13,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## 架构
 
 - `Sources/RyouToolbox/Core/Tool.swift`：`ToolRegistry.all` 是工具注册表，**新增工具只需新建视图并在此追加一项**。
-- `Core/Shell.swift`：`Shell.run(命令, 参数)` 经 `/usr/bin/env` 异步执行外部命令。GUI 应用没有 shell 的 PATH，所以这里补全了 `/opt/homebrew/bin` 等，并设置 `LARKSUITE_CLI_NO_*_NOTIFIER`。
+- `Core/Shell.swift`：`Shell.run(命令, 参数)` 经 `/usr/bin/env` 异步执行外部命令。GUI 应用没有 shell 的 PATH，所以这里补全了 `~/.local/bin`（pipx/uv）、`/opt/homebrew/bin` 等，并设置 `LARKSUITE_CLI_NO_*_NOTIFIER`；stdin 接 nullDevice，避免子进程等待输入卡死。
 - `Tools/Tailscale`：`tailscale status --json` → Codable 解析（`Self`/`Peer` 是 Swift 保留词，需 CodingKeys 重命名）；只取 IPv4。SSH 开关由 `sshHostKeys` 非空推断；Tailscale 不对外提供其他节点的客户端版本，只能查本机版本并与 `pkgs.tailscale.com/stable/?mode=json` 的 `TarballsVersion` 比较。
 - `Tools/Lark`（只读）：`lark-cli profile list` → 对每个 Profile 并发 `auth status --profile <n> --json --verify`。“有效 User”判定：`identity=="user" && verified && identities.user.tokenStatus=="valid"`，与 `lark-user-bind.zsh` 的 `verify_profile` 保持一致。
+- `Tools/Ductor`：Ductor（PyPI 包，把 Claude Code / Codex / Gemini CLI 接到 Telegram/Matrix/Slack）。状态全部读本地 `~/.ductor/`（`config/config.json`、`logs/*.log`、`bot.pid`）＋ `launchctl list dev.ductor`，不解析 rich 的表格输出；运行状态看 `bot.pid` 里的进程是否存活（`kill(pid, 0)`）。运维按钮走非交互子命令（`service start/stop/install/uninstall`、`docker enable/disable`、`status`、`agents list`）；有交互的命令（`onboarding`、`uninstall`、`agents add`、`upgrade`——它会 stop 后 exec 自己，跟 launchd KeepAlive 抢）一律生成 `.command` 脚本用 `open` 丢给 Terminal，不用 AppleScript（避免自动化授权弹窗）。日志用 `tail -n 200` 读，`docker enable/disable` 只改配置，需重启生效。
 - Model 用 `@MainActor @Observable`（Swift 6 严格并发）。
