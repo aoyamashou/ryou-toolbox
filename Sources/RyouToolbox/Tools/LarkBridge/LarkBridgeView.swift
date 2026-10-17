@@ -1,13 +1,19 @@
 import SwiftUI
 import AppKit
 
-/// 飞书 / Lark × 本机 coding agent 的桥：lark-channel-bridge（社区工具）。
-/// 你用的是 Lark 租户，所以安装与初始化都按 `--tenant lark` 走。
+/// Lark（国际版）× 本机 coding agent 的桥：lark-channel-bridge（社区工具）。
+/// 你只用 Lark 租户，所以所有需要租户参数的命令都固定带 `--tenant lark`。
 struct LarkBridgeView: View {
     @State private var model = LarkBridgeModel()
     @State private var pendingUnregister: String?
     @State private var pendingRemove: String?
     @State private var confirmInstall = false
+    /// 新建 profile 时先问名字（`profile create <name>` 的 name 是必填参数）
+    @State private var showNewProfile = false
+    /// 初始化时要选 agent：机器上同时装了 claude 和 codex，`run` 不指定会直接报错
+    @State private var onboardingAgent = "claude"
+    /// 页面底部的内嵌终端（点按钮时展开并自动输入命令）
+    @State private var terminal: EmbeddedTerminal?
 
     private let repoURL = URL(string: "https://github.com/zarazhangrui/lark-coding-agent-bridge")!
 
@@ -33,6 +39,7 @@ struct LarkBridgeView: View {
             }
         }
         .navigationTitle("Lark Bridge")
+        .inlineTerminal($terminal, title: "lark-channel-bridge", subtitle: "命令已填好，回车执行")
         .toolbar {
             ToolbarItem {
                 Button { Task { await model.refresh() } } label: {
@@ -42,18 +49,19 @@ struct LarkBridgeView: View {
             }
             ToolbarItem {
                 Menu {
-                    Button("打开终端（不执行命令）") { Terminal.run() }
-                    Button("前台运行 bridge（首次扫码向导）") { Terminal.run("lark-channel-bridge run") }
-                    Button("前台运行 · Lark 租户") { Terminal.run("lark-channel-bridge run --tenant lark") }
+                    Button("打开内嵌终端（不执行命令）") { openTerminal() }
+                    Button("前台运行 bridge（首次扫码向导）") { openTerminal("lark-channel-bridge run --agent \(onboardingAgent) --tenant lark") }
                     Divider()
-                    Button("网页控制台（--web-ui）") { Terminal.run("lark-channel-bridge run --web-ui") }
+                    Button("网页控制台（--web-ui）") { openTerminal("lark-channel-bridge run --web-ui --tenant lark") }
                     Button("查看 daemon 日志") {
-                        Terminal.run("tail -f ~/.lark-channel/profiles/\(model.selectedProfileForLogs)/logs/daemon/daemon-stderr.log")
+                        openTerminal("tail -f ~/.lark-channel/profiles/\(model.selectedProfileForLogs)/logs/daemon/daemon-stderr.log")
                     }
+                    Divider()
+                    Button("在系统 Terminal 中打开") { Terminal.run() }
                 } label: {
                     Label("终端", systemImage: "terminal")
                 }
-                .help("交互式命令（扫码初始化等）在 Terminal 里执行")
+                .help("交互式命令（扫码初始化等）在页面底部的内嵌终端里执行")
             }
         }
         .overlay {
@@ -66,7 +74,19 @@ struct LarkBridgeView: View {
             }
         }
         .task { await model.refresh() }
+        .onAppear {
+            // 没有 profile 时点「启动」也会走页面底部的内嵌终端，而不是跳去 Terminal.app
+            model.openOnboarding = { command in
+                openTerminal(command, autoSubmit: true)
+            }
+        }
         .sheet(item: $model.output) { OutputSheet(item: $0) }
+        .sheet(isPresented: $showNewProfile) {
+            NewBridgeProfileSheet { name in
+                showNewProfile = false
+                openTerminal("lark-channel-bridge profile create --tenant lark \(name)")
+            }
+        }
         .confirmationDialog("注销 “\(pendingUnregister ?? "")” 的后台服务？（不会删除配置和会话）",
                             isPresented: Binding(get: { pendingUnregister != nil },
                                                  set: { if !$0 { pendingUnregister = nil } }),
@@ -101,21 +121,19 @@ struct LarkBridgeView: View {
         VStack(spacing: 14) {
             ContentUnavailableView("未检测到 lark-channel-bridge",
                                    systemImage: "shippingbox",
-                                   description: Text("把飞书 / Lark 消息接通本机 Claude Code / Codex CLI。需要 Node.js ≥ 20.12。"))
+                                   description: Text("把 Lark 消息接通本机 Claude Code / Codex CLI。需要 Node.js ≥ 20.12。"))
             VStack(alignment: .leading, spacing: 8) {
                 Text("官方安装命令（点右边按钮复制）").font(.callout).bold()
                 CommandRow(command: "npm i -g lark-channel-bridge")
                 CommandRow(command: "pnpm add -g lark-channel-bridge")
-                Text("装好后首次运行 `lark-channel-bridge run` 会出二维码，用飞书 App 扫码创建 / 选择 PersonalAgent 应用。")
-                    .font(.caption).foregroundStyle(.secondary)
-                Text("你是 Lark 租户：扫码会自动识别；如果手动给 --app-id，记得加 `--tenant lark`。")
+                Text("装好后首次运行 `lark-channel-bridge run --tenant lark` 会出二维码，用 Lark App 扫码创建 / 选择 PersonalAgent 应用。")
                     .font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: 520)
             HStack(spacing: 12) {
                 Button("在终端执行安装") { confirmInstall = true }
                     .buttonStyle(.borderedProminent)
-                Button("在终端手动操作") { Terminal.run() }
+                Button("在终端手动操作") { openTerminal() }
                 Link("GitHub 仓库", destination: repoURL)
             }
             if let node = model.nodeVersion {
@@ -195,23 +213,37 @@ struct LarkBridgeView: View {
                 Image(systemName: "qrcode")
                 Text("还差一步：扫码创建 PersonalAgent 应用").font(.headline)
             }
-            Text("首次初始化必须在终端里跑（会出二维码、让你选 agent），App 没法替你扫码。你是 Lark 租户，所以命令带 --tenant lark。")
+            Text("首次初始化必须交互（会出二维码），所以在页面底部的内嵌终端里跑，命令已带上 `--tenant lark`。")
                 .font(.callout).foregroundStyle(.secondary)
+
+            // 这台机器同时装了 claude 和 codex，`run` 不指定 --agent 会直接报错退出。
+            HStack(spacing: 8) {
+                Text("agent").font(.caption).foregroundStyle(.secondary)
+                Picker("", selection: $onboardingAgent) {
+                    Text("Claude Code").tag("claude")
+                    Text("Codex").tag("codex")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(width: 200)
+            }
+
             VStack(alignment: .leading, spacing: 8) {
                 Text("方式一 · 扫码自动创建应用（推荐）").font(.caption).bold()
-                CommandRow(command: "lark-channel-bridge run --tenant lark")
+                CommandRow(command: "lark-channel-bridge run --agent \(onboardingAgent) --tenant lark")
                 Text("方式二 · 已有 PersonalAgent 应用（cli_ 开头）").font(.caption).bold()
-                CommandRow(command: "lark-channel-bridge run --app-id cli_xxx --tenant lark")
+                CommandRow(command: "lark-channel-bridge run --app-id cli_xxx --agent \(onboardingAgent) --tenant lark")
                 Text("方式三 · 直接注册成开机自启的后台服务").font(.caption).bold()
-                CommandRow(command: "lark-channel-bridge start --tenant lark")
+                CommandRow(command: "lark-channel-bridge start --agent \(onboardingAgent) --tenant lark")
             }
             HStack(spacing: 12) {
-                Button("在终端扫码初始化") {
-                    Terminal.run("lark-channel-bridge run --tenant lark")
+                Button("在内嵌终端扫码初始化") {
+                    openTerminal("lark-channel-bridge run --agent \(onboardingAgent) --tenant lark", autoSubmit: true)
                 }
                 .buttonStyle(.borderedProminent)
                 Button("用已有 app-id 初始化") {
-                    Terminal.run("lark-channel-bridge run --app-id ")
+                    // app-id / agent / 租户都填好，用户只需把 cli_xxx 换掉
+                    openTerminal("lark-channel-bridge run --app-id cli_xxx --agent \(onboardingAgent) --tenant lark")
                 }
                 Link("中文文档", destination: URL(string: "https://github.com/zarazhangrui/lark-coding-agent-bridge/blob/main/README.zh.md")!)
             }
@@ -238,15 +270,15 @@ struct LarkBridgeView: View {
                 .controlSize(.small)
             }
             if model.processes.isEmpty {
-                Text("当前没有 bot 在运行。点下面的「启动」或在终端跑 `lark-channel-bridge run`。")
+                Text("当前没有 bot 在运行。点下面的「启动」或在终端跑 `lark-channel-bridge run --tenant lark`。")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(model.processes) { p in
                     HStack(spacing: 8) {
                         Text(p.botName ?? "（未握手）").font(.callout).bold()
                         Text(p.appId).font(.caption).monospaced().foregroundStyle(.secondary)
-                        chip(p.tenant == "lark" ? "Lark" : p.tenant == "feishu" ? "飞书" : p.tenant,
-                             p.tenant == "lark" ? .blue : .green)
+                        chip(p.tenant == "lark" ? "Lark" : p.tenant,
+                             p.tenant == "lark" ? .blue : .orange)
                         chip(p.agent, .purple)
                         Text("profile \(p.profile)").font(.caption2).foregroundStyle(.secondary)
                         Spacer()
@@ -272,13 +304,13 @@ struct LarkBridgeView: View {
                     Label("profile list", systemImage: "list.bullet.indent")
                 }
                 .controlSize(.small)
-                Button { Terminal.run("lark-channel-bridge profile create --tenant lark") } label: {
+                Button { showNewProfile = true } label: {
                     Label("新建", systemImage: "plus")
                 }
                 .controlSize(.small)
             }
             if model.profiles.isEmpty {
-                Text("还没有 profile。先在终端跑一次 `lark-channel-bridge run` 扫码创建。")
+                Text("还没有 profile。点右上角「新建」或跑一次 `lark-channel-bridge run --tenant lark` 扫码创建。")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 ForEach(model.profiles) { p in
@@ -342,10 +374,10 @@ struct LarkBridgeView: View {
                 }
                 upgradeAction
                 action("前台运行（扫码）", "qrcode") {
-                    Terminal.run("lark-channel-bridge run --tenant lark")
+                    openTerminal("lark-channel-bridge run --agent \(onboardingAgent) --tenant lark", autoSubmit: true)
                 }
             }
-            Text("扫码初始化、profile create/remove、web 控制台这类交互命令在「终端」菜单里执行。")
+            Text("扫码初始化、profile create/remove、web 控制台这类交互命令在「终端」菜单或内嵌终端里执行。")
                 .font(.caption).foregroundStyle(.secondary)
         }
         .padding(12)
@@ -354,7 +386,7 @@ struct LarkBridgeView: View {
 
     private var upgradeAction: some View {
         Button {
-            Terminal.run("npm i -g lark-channel-bridge")
+            openTerminal("npm i -g lark-channel-bridge", autoSubmit: true)
             Task { try? await Task.sleep(for: .seconds(25)); await model.refresh() }
         } label: {
             Label(model.hasUpdate ? "升级到 \(model.latestVersion ?? "最新")" : "升级",
@@ -380,8 +412,13 @@ struct LarkBridgeView: View {
         if let url = model.consoleURL, let u = URL(string: url) {
             NSWorkspace.shared.open(u)
         } else {
-            Terminal.run("lark-channel-bridge ui")
+            openTerminal("lark-channel-bridge ui", autoSubmit: true)
         }
+    }
+
+    /// 在页面底部展开内嵌终端并输入命令（默认只填不回车，方便先改参数）。
+    private func openTerminal(_ command: String = "", autoSubmit: Bool = false) {
+        openInlineTerminal($terminal, command: command, autoSubmit: autoSubmit)
     }
 
     // MARK: 日志
@@ -447,7 +484,7 @@ struct LarkBridgeView: View {
     // MARK: 安装
 
     private func install() async {
-        Terminal.run("npm i -g lark-channel-bridge")
+        openTerminal("npm i -g lark-channel-bridge", autoSubmit: true)
         try? await Task.sleep(for: .seconds(20))
         await model.refresh()
     }
@@ -457,5 +494,39 @@ struct LarkBridgeView: View {
             .font(.caption2)
             .padding(.horizontal, 5).padding(.vertical, 1)
             .background(color.opacity(0.2), in: Capsule())
+    }
+}
+
+/// 新建 profile 前先问名字：`profile create <name>` 的 name 是必填参数，缺了会报 missing required argument。
+struct NewBridgeProfileSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    let onCreate: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("新建 Profile").font(.headline)
+            Text("profile 名只用字母、数字、连字符，例如 `work`、`personal`。")
+                .font(.caption).foregroundStyle(.secondary)
+            TextField("profile 名", text: $name)
+                .textFieldStyle(.roundedBorder)
+            Text("命令：lark-channel-bridge profile create --tenant lark \(name.isEmpty ? "<name>" : name)")
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+            HStack {
+                Spacer()
+                Button("取消") { dismiss() }
+                Button("创建") {
+                    let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return }
+                    onCreate(trimmed)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 420)
     }
 }

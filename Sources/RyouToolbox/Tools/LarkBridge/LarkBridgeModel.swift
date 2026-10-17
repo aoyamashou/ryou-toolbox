@@ -277,13 +277,18 @@ final class LarkBridgeModel {
         return ["--profile", name]
     }
 
+    /// 没有 profile 时由视图注入：展开内嵌终端并跑扫码初始化。
+    /// （模型层不直接调 Terminal.run，避开跳外部的 Terminal.app）
+    var openOnboarding: ((String) -> Void)?
+
     func start(profile name: String?) async {
         guard !needsOnboarding else {
-            message = "还没有 profile，先在终端扫码初始化（已为你打开终端）"
-            Terminal.run("lark-channel-bridge run --tenant lark")
+            let command = "lark-channel-bridge run --tenant lark"
+            message = "还没有 profile，先在终端扫码初始化"
+            if let openOnboarding { openOnboarding(command) } else { Terminal.run(command) }
             return
         }
-        await run(["start"] + profileArgs(name ?? activeProfile),
+        await run(["start"] + profileArgs(name ?? activeProfile) + ["--tenant", "lark"],
                   title: "启动 \(name ?? activeProfile ?? "")", showSheet: true)
         await waitForConnect()
     }
@@ -306,7 +311,7 @@ final class LarkBridgeModel {
         } else {
             await run(["stop"] + profileArgs(target), title: "停止", showSheet: false)
             try? await Task.sleep(for: .seconds(1))
-            await run(["start"] + profileArgs(target), title: "启动", showSheet: true)
+            await run(["start"] + profileArgs(target) + ["--tenant", "lark"], title: "启动", showSheet: true)
         }
         await waitForConnect()
     }

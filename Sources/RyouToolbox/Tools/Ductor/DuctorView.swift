@@ -5,6 +5,8 @@ struct DuctorView: View {
     @State private var model = DuctorModel()
     @State private var pendingUninstall = false
     @State private var confirmTerminal = false
+    /// 页面底部的内嵌终端（点按钮时展开并自动输入命令）
+    @State private var terminal: EmbeddedTerminal?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -26,6 +28,7 @@ struct DuctorView: View {
             }
         }
         .navigationTitle("Ductor")
+        .inlineTerminal($terminal, title: "ductor", subtitle: "命令已填好，回车执行")
         .toolbar {
             ToolbarItem {
                 Button { Task { await model.refresh() } } label: {
@@ -35,16 +38,18 @@ struct DuctorView: View {
             }
             ToolbarItem {
                 Menu {
-                    Button("打开终端（不执行命令）") { openTerminal(shellOnly: true) }
+                    Button("打开内嵌终端（不执行命令）") { openTerminal(shellOnly: true) }
                     if !model.serviceInstalled {
                         Button("运行 ductor（前台）") { openTerminal(script: "ductor") }
                     }
                     Button("重新运行 onboarding") { openTerminal(script: "ductor onboarding") }
                     Button("配置子代理（agents add）") { openTerminal(script: "ductor agents add") }
+                    Divider()
+                    Button("在系统 Terminal 中打开") { Terminal.run() }
                 } label: {
                     Label("终端", systemImage: "terminal")
                 }
-                .help("在 Terminal 里执行交互式命令")            }
+                .help("在页面底部的内嵌终端里执行交互式命令")            }
         }
         .overlay {
             if model.busy {
@@ -297,11 +302,13 @@ struct DuctorView: View {
     // MARK: 终端
 
     private func openTerminal(script: String? = nil, shellOnly: Bool = false) {
-        Terminal.run(shellOnly ? nil : (script ?? "ductor"))
+        openInlineTerminal($terminal,
+                           command: shellOnly ? "" : (script ?? "ductor"),
+                           autoSubmit: !shellOnly)
     }
 
     private func openInTerminal(_ cmd: String) async {
-        Terminal.run(cmd)
+        openInlineTerminal($terminal, command: cmd, autoSubmit: true)
         // 安装/卸载是长任务，稍后再刷新一次
         try? await Task.sleep(for: .seconds(3))
         await model.refresh()
