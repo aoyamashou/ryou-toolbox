@@ -16,5 +16,6 @@ enum ToolRegistry {
         Tool(id: "tailscale", title: "Tailscale 节点", icon: "network") { AnyView(TailscaleView()) },
         Tool(id: "lark", title: "Lark 登录状态", icon: "person.badge.key") { AnyView(LarkView()) },
         Tool(id: "ductor", title: "Ductor", icon: "bolt.horizontal.circle") { AnyView(DuctorView()) },
+        Tool(id: "larkbridge", title: "Lark Bridge", icon: "bubble.left.and.bubble.right") { AnyView(LarkBridgeView()) },
     ]
 }

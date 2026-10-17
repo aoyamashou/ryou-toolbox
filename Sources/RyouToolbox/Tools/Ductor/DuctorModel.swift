@@ -30,12 +30,6 @@ struct DuctorAgent: Identifiable, Sendable {
     var id: String { name }
 }
 
-struct OutputItem: Identifiable {
-    let id = UUID()
-    let title: String
-    let text: String
-}
-
 enum DuctorPaths {
     static let home = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".ductor")
     static let config = home.appendingPathComponent("config/config.json")

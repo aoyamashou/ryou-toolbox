@@ -84,13 +84,7 @@ struct DuctorView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("官方安装命令（点右边按钮复制，粘到终端执行）").font(.callout).bold()
                 ForEach(["pipx install ductor", "uv tool install ductor"], id: \.self) { cmd in
-                    HStack {
-                        Text(cmd).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
-                        Spacer()
-                        copyButton(cmd)
-                    }
-                    .padding(8)
-                    .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
+                    CommandRow(command: cmd)
                 }
                 Text("装完后在终端运行 `ductor`，向导会让你选 Telegram token、允许的用户、时区和可选 Docker 等。")
                     .font(.caption).foregroundStyle(.secondary)
@@ -302,77 +296,14 @@ struct DuctorView: View {
 
     // MARK: 终端
 
-    private func copyButton(_ text: String) -> some View {
-        Button {
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(text, forType: .string)
-        } label: {
-            Label("复制", systemImage: "doc.on.doc")
-        }
-        .controlSize(.small)
-    }
-
-    /// 在 Terminal 里打开一个新窗口并执行命令（交互式命令必须这样跑）。
-    /// 用 .command 脚本 + `open` 的方式，不触发 AppleScript 自动化授权。
     private func openTerminal(script: String? = nil, shellOnly: Bool = false) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("RyouToolbox", isDirectory: true)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        if let olds = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) {
-            for o in olds { try? FileManager.default.removeItem(at: o) }
-        }
-        var lines = ["#!/bin/zsh -l", "cd \"$HOME\""]
-        if let script, !shellOnly {
-            lines.append(script)
-            lines.append("exec zsh -l")
-        }
-        let file = dir.appendingPathComponent("ductor.command")
-        guard (try? lines.joined(separator: "\n").appending("\n")
-            .write(to: file, atomically: true, encoding: .utf8)) != nil else { return }
-        try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: file.path)
-        let terminal = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
-        if FileManager.default.fileExists(atPath: terminal.path) {
-            NSWorkspace.shared.open([file], withApplicationAt: terminal,
-                                    configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            NSWorkspace.shared.open(file)
-        }
+        Terminal.run(shellOnly ? nil : (script ?? "ductor"))
     }
 
     private func openInTerminal(_ cmd: String) async {
-        openTerminal(script: cmd)
+        Terminal.run(cmd)
         // 安装/卸载是长任务，稍后再刷新一次
         try? await Task.sleep(for: .seconds(3))
         await model.refresh()
-    }
-}
-
-// MARK: - 输出弹窗
-
-private struct OutputSheet: View {
-    let item: OutputItem
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(item.title).font(.headline)
-                Spacer()
-                Button("复制") {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(item.text, forType: .string)
-                }
-                Button("关闭") { dismiss() }.keyboardShortcut(.defaultAction)
-            }
-            ScrollView {
-                Text(item.text)
-                    .font(.system(size: 11.5, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .textSelection(.enabled)
-                    .padding(10)
-            }
-            .background(.black.opacity(0.06), in: RoundedRectangle(cornerRadius: 8))
-        }
-        .padding(16)
-        .frame(width: 640, height: 460)
     }
 }
