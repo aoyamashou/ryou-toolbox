@@ -204,56 +204,6 @@ struct TerminalHost: NSViewRepresentable {
     }
 }
 
-/// 页面底部的内嵌终端槽位：`nil` 时不占空间，展开时从底部滑出。
-struct InlineTerminalModifier: ViewModifier {
-    @Binding var terminal: EmbeddedTerminal?
-    let title: String
-    var subtitle: String?
-
-    func body(content: Content) -> some View {
-        VStack(spacing: 0) {
-            content
-            if let terminal {
-                Divider()
-                EmbeddedTerminalPanel(terminal: terminal, title: title, subtitle: subtitle) {
-                    terminal.stop()
-                    self.terminal = nil
-                }
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .transition(.move(edge: .bottom).combined(with: .opacity))
-            }
-        }
-        .onDisappear { terminal?.stop() }
-    }
-}
-
-extension View {
-    /// 在当前页面底部挂一个内嵌终端（`nil` 时隐藏）。
-    func inlineTerminal(_ terminal: Binding<EmbeddedTerminal?>,
-                        title: String = "终端",
-                        subtitle: String? = nil) -> some View {
-        modifier(InlineTerminalModifier(terminal: terminal, title: title, subtitle: subtitle))
-    }
-}
-
-/// 打开（或复用）页面底部的内嵌终端并输入命令。
-@MainActor
-func openInlineTerminal(_ slot: Binding<EmbeddedTerminal?>,
-                        command: String,
-                        autoSubmit: Bool = false) {
-    let terminal = slot.wrappedValue ?? EmbeddedTerminal()
-    slot.wrappedValue = terminal
-    terminal.start()
-    guard !command.isEmpty else { return }
-    if autoSubmit {
-        terminal.run(command)
-    } else {
-        terminal.type(command)
-    }
-}
-
 struct EmbeddedTerminalPanel: View {
     @ObservedObject var terminal: EmbeddedTerminal
     let title: String

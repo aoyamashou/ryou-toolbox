@@ -132,8 +132,6 @@ final class LarkBridgeModel {
 
     var error: String?
     var message: String?
-    var busy = false
-    var output: OutputItem?
 
     var nodeVersion: String?
 
@@ -253,108 +251,6 @@ final class LarkBridgeModel {
     private func refreshServiceState() {
         let candidates = [BridgePaths.supervisorPlist] + profiles.map { BridgePaths.servicePlist($0.name) }
         serviceInstalled = candidates.contains { FileManager.default.fileExists(atPath: $0.path) }
-    }
-
-    // MARK: 操作
-
-    func run(_ args: [String], title: String, showSheet: Bool = false) async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        let r = await Shell.run("lark-channel-bridge", args)
-        let raw = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? r.stderr : r.stdout
-        let text = Self.stripANSI(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        message = r.status == 0 ? "✅ \(title)完成" : "❌ \(title)失败（退出码 \(r.status)）"
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).count
-        if r.status != 0 || (showSheet && lines > 1) {
-            output = OutputItem(title: title, text: text.isEmpty ? "（无输出）" : text)
-        }
-        await refresh()
-    }
-
-    private func profileArgs(_ name: String?) -> [String] {
-        guard let name, !name.isEmpty else { return [] }
-        return ["--profile", name]
-    }
-
-    /// 没有 profile 时由视图注入：展开内嵌终端并跑扫码初始化。
-    /// （模型层不直接调 Terminal.run，避开跳外部的 Terminal.app）
-    var openOnboarding: ((String) -> Void)?
-
-    func start(profile name: String?) async {
-        guard !needsOnboarding else {
-            let command = "lark-channel-bridge run --tenant lark"
-            message = "还没有 profile，先在终端扫码初始化"
-            if let openOnboarding { openOnboarding(command) } else { Terminal.run(command) }
-            return
-        }
-        await run(["start"] + profileArgs(name ?? activeProfile) + ["--tenant", "lark"],
-                  title: "启动 \(name ?? activeProfile ?? "")", showSheet: true)
-        await waitForConnect()
-    }
-
-    func stop(profile name: String?) async {
-        guard !needsOnboarding else { return }
-        await run(["stop"] + profileArgs(name ?? activeProfile),
-                  title: "停止 \(name ?? activeProfile ?? "")", showSheet: true)
-        try? await Task.sleep(for: .seconds(1))
-        loadProcesses()
-        refreshServiceState()
-    }
-
-    func restart(profile name: String?) async {
-        guard !needsOnboarding else { return }
-        let target = name ?? activeProfile
-        // restart 要求服务已注册，否则用 stop + start
-        if serviceInstalled {
-            await run(["restart"] + profileArgs(target), title: "重启 \(target ?? "")", showSheet: true)
-        } else {
-            await run(["stop"] + profileArgs(target), title: "停止", showSheet: false)
-            try? await Task.sleep(for: .seconds(1))
-            await run(["start"] + profileArgs(target) + ["--tenant", "lark"], title: "启动", showSheet: true)
-        }
-        await waitForConnect()
-    }
-
-    func status(profile name: String?) async {
-        guard !needsOnboarding else {
-            message = "还没有 profile，先在终端扫码初始化"
-            return
-        }
-        await run(["status"] + profileArgs(name ?? activeProfile), title: "服务状态", showSheet: true)
-    }
-
-    func ps() async { await run(["ps"], title: "运行中的 bot", showSheet: true) }
-    func profileList() async { await run(["profile", "list"], title: "Profile 列表", showSheet: true) }
-
-    func useProfile(_ name: String) async {
-        await run(["profile", "use", name], title: "切换 profile")
-    }
-
-    /// 归档 profile（不删数据，可用同名重建）。`profile remove` 本身不交互。
-    func removeProfile(_ name: String) async {
-        await run(["profile", "remove", name], title: "删除 profile \(name)", showSheet: true)
-    }
-
-    func unregister(profile name: String?) async {
-        await run(["unregister"] + profileArgs(name), title: "注销后台服务", showSheet: true)
-    }
-
-    /// 后台服务启动后，进程注册表要等 WebSocket 握手才写入，轮询几次。
-    private func waitForConnect(timeout: Double = 12) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            try? await Task.sleep(for: .seconds(0.8))
-            loadProcesses()
-            if !processes.isEmpty {
-                refreshServiceState()
-                await loadLogFiles()
-                await refreshLogs()
-                return
-            }
-        }
-        loadProcesses()
-        refreshServiceState()
     }
 
     // MARK: 日志

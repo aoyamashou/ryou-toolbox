@@ -33,25 +33,3 @@ struct OutputSheet: View {
         .frame(width: 640, height: 460)
     }
 }
-
-/// 「命令行 + 复制按钮」一行，安装命令展示用。
-struct CommandRow: View {
-    let command: String
-
-    var body: some View {
-        HStack {
-            Text(command)
-                .font(.system(.callout, design: .monospaced))
-                .textSelection(.enabled)
-            Spacer()
-            Button {
-                Terminal.copy(command)
-            } label: {
-                Label("复制", systemImage: "doc.on.doc")
-            }
-            .controlSize(.small)
-        }
-        .padding(8)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-    }
-}

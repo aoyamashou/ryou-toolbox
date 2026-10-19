@@ -62,8 +62,6 @@ final class DuctorModel {
     var error: String?
     var message: String?
     var loading = false
-    var busy = false
-    var output: OutputItem?
 
     var serviceLabel: String {
         guard serviceInstalled else { return "未安装" }
@@ -162,93 +160,6 @@ final class DuctorModel {
         let seconds = Int(Date().timeIntervalSince(started))
         uptime = "\(seconds / 3600)h \((seconds % 3600) / 60)m"
     }
-
-    // MARK: 操作
-
-    func run(_ args: [String], title: String, showSheet: Bool = false) async {
-        guard !busy else { return }
-        busy = true
-        defer { busy = false }
-        let r = await Shell.run("ductor", args)
-        let raw = r.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? r.stderr : r.stdout
-        let text = Self.stripANSI(raw).trimmingCharacters(in: .whitespacesAndNewlines)
-        message = r.status == 0 ? "✅ \(title)完成" : "❌ \(title)失败（退出码 \(r.status)）"
-        // 失败必看；成功时只有多行/有内容的输出才弹窗口，避免一句话也弹大窗口
-        let lines = text.split(separator: "\n", omittingEmptySubsequences: true).count
-        if r.status != 0 || (showSheet && lines > 1) {
-            output = OutputItem(title: title, text: text.isEmpty ? "（无输出）" : text)
-        }
-        await refresh()
-    }
-
-    func start() async {
-        await run(["service", "start"], title: "启动服务", showSheet: true)
-        await waitForRunning()
-    }
-
-    func stop() async {
-        if serviceInstalled {
-            await run(["service", "stop"], title: "停止服务", showSheet: true)
-            try? await Task.sleep(for: .seconds(1))
-            readRuntimeState()
-            if serviceInstalled {
-                let lc = await Shell.run("launchctl", ["list", "dev.ductor"])
-                serviceLoaded = lc.status == 0 && lc.stdout.contains("\"PID\"")
-            }
-            await refreshLogs()
-        } else {
-            await run(["stop"], title: "停止", showSheet: true)
-        }
-    }
-
-    func restart() async {
-        if serviceInstalled {
-            // launchctl stop 后立刻 start 会被忽略，中间隔一下
-            _ = await Shell.run("ductor", ["service", "stop"])
-            try? await Task.sleep(for: .seconds(2))
-            await run(["service", "start"], title: "重启服务", showSheet: true)
-            await waitForRunning()
-        } else {
-            await run(["restart"], title: "重启", showSheet: true)
-        }
-    }
-
-    /// launchctl start 立即返回，bot.pid 稍后才写入；轮询几次再收尾。
-    private func waitForRunning(timeout: Double = 8) async {
-        let deadline = Date().addingTimeInterval(timeout)
-        while Date() < deadline {
-            try? await Task.sleep(for: .seconds(0.5))
-            readRuntimeState()
-            if running {
-                let lc = await Shell.run("launchctl", ["list", "dev.ductor"])
-                serviceLoaded = lc.status == 0 && lc.stdout.contains("\"PID\"")
-                await loadLogFileList()
-                await refreshLogs()
-                return
-            }
-        }
-    }
-
-    func installService() async {
-        await run(["service", "install"], title: "安装后台服务", showSheet: true)
-    }
-
-    func uninstallService() async {
-        await run(["service", "uninstall"], title: "卸载后台服务", showSheet: true)
-    }
-
-    func toggleDocker() async {
-        let turningOn = !dockerEnabled
-        await run(["docker", turningOn ? "enable" : "disable"],
-                  title: turningOn ? "启用 Docker 沙箱" : "关闭 Docker 沙箱", showSheet: true)
-        // ductor 的 docker enable/disable 只改 config，需重启才生效
-        if message?.hasPrefix("✅") == true {
-            message = "已\(turningOn ? "启用" : "关闭") Docker 沙箱，重启服务后生效"
-        }
-    }
-
-    func status() async { await run(["status"], title: "运行诊断", showSheet: true) }
-    func listAgents() async { await run(["agents", "list"], title: "子代理", showSheet: true) }
 
     var hasUpdate: Bool {
         guard let v = version, let latest = latestVersion else { return false }
